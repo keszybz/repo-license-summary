@@ -51,7 +51,9 @@ def find_license(path, file):
         line = line.strip()
         if m := re.search(r'SPDX-License-Identifier:\s*(.*)', line):
             text = m.group(1)
-            text = text.removesuffix('*/').removesuffix('*}').removesuffix('-->').strip()
+            if m := re.match(r'(.*?)(\*/|\*\}|#\}|-->)\s*', text):
+                text = m.group(1)
+            text = text.strip()
             return text
 
         if n > 20:
