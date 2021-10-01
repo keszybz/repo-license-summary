@@ -75,7 +75,7 @@ class File:
         if self.path.is_symlink():
             raise ValueError('symlink in unexpected place')
 
-        with open(opts.repository / self.path) as f:
+        with open(self.opts.repository / self.path) as f:
             try:
                 lic = find_license(self.path, f)
             except UnicodeDecodeError as e:
@@ -178,6 +178,13 @@ def find_files(opts):
         subtree = tree / subpath if subpath.name else tree
         find_files_one(opts, subtree, subpath)
 
-if __name__ == '__main__':
+def __main__():
     opts = do_opts()
     find_files(opts)
+
+if __name__ == '__main__':
+    try:
+        __main__()
+    except BrokenPipeError:
+        # Don't fail if we are piped to a pager and the user exists before the end
+        pass
