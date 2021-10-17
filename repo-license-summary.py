@@ -15,6 +15,16 @@ import typing
 import pygit2
 from fnmatch import fnmatch
 
+try:
+    import colorama as c
+    GREEN = c.Fore.GREEN
+    YELLOW = c.Fore.YELLOW
+    RED = c.Fore.RED
+    RESET_ALL = c.Style.RESET_ALL
+    BRIGHT = c.Style.BRIGHT
+except ImportError:
+    GREEN = YELLOW = RED = RESET_ALL = BRIGHT = ''
+
 IGNORED_FILES = [
     'README',
     'README.*',
@@ -165,7 +175,7 @@ def find_files_one(opts, tree, subpath):
         if prev == (indent, lics):
             print(f'{indent}{path.name}{TYPE_SUFFIXES[typ]}')
         else:
-            print(f'{indent}{path.name}{TYPE_SUFFIXES[typ]} → {", ".join(lics)}')
+            print(f'{indent}{path.name}{TYPE_SUFFIXES[typ]} → {BRIGHT}{", ".join(lics)}{RESET_ALL}')
             prev = (indent, lics)
 
 def find_files(opts):
