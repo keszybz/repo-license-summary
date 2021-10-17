@@ -92,16 +92,16 @@ class File:
                 lic = find_license(self.path, f)
             except UnicodeDecodeError as e:
                 print(f'Cannot read {self.path}: {e}')
-                return ['unreadable']
+                return ('unreadable',)
 
         if lic == 'unknown':
             name = self.path.name.removesuffix('.in')
             if any(fnmatch(name, p) for p in IGNORED_FILES):
                 # print(f'{path}: no license, ignoring file')
-                return []
+                return ()
 
         # print(f'{path}: {lic}')
-        return [lic]
+        return (lic,)
 
     def type(self):
         return 'file'
@@ -111,7 +111,7 @@ class File:
 
     def order(self):
         # files sort after other types
-        return (1, self.licenses(), self.path.name)
+        return 1, self.licenses(), self.path.name
 
     def walk(self):
         if lics := self.licenses():
@@ -153,7 +153,7 @@ class Subtree:
     def licenses(self):
         if self._licenses_cache is None:
             lics = itertools.chain.from_iterable(e.licenses() for e in self.entries())
-            self._licenses_cache = sorted(set(lics))
+            self._licenses_cache = tuple(sorted(set(lics)))
         return self._licenses_cache
 
     def type(self):
@@ -166,7 +166,7 @@ class Subtree:
         # files sort after other types
         lics = self.licenses()
         order = 2 if len(lics) <= 1 else 3
-        return (order, self.licenses(), self.path.name)
+        return order, self.licenses(), self.path.name
 
     def walk(self):
         lics = self.licenses()
@@ -207,7 +207,7 @@ class GroupSuffixes:
 
     def _walk(self, phase):
         for suffix, items in self.by_ext.items():
-            lics = set(tuple(item.licenses()) for item in items)
+            lics = set(item.licenses() for item in items)
 
             # We group items if they all have the same license.
             # We don't want to "group" one item, because it's clearer to display it
