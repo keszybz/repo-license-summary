@@ -72,18 +72,18 @@ def find_license(path, file):
             break
     return 'unknown'
 
+def generate_list(func):
+    def wrapper(*args, **kwargs):
+        return list(func(*args, **kwargs))
+    return functools.update_wrapper(wrapper, func)
+
 @dataclasses.dataclass
 class File:
     opts: argparse.Namespace
     path: pathlib.Path
-    _licenses_cache: typing.Optional[list] = dataclasses.field(default=None, init=False)
 
+    @functools.cached_property
     def licenses(self):
-        if self._licenses_cache is None:
-            self._licenses_cache = self._licenses()
-        return self._licenses_cache
-
-    def _licenses(self):
         if self.path.is_symlink():
             raise ValueError('symlink in unexpected place')
 
@@ -103,30 +103,33 @@ class File:
         # print(f'{path}: {lic}')
         return (lic,)
 
+    @functools.cached_property
     def type(self):
         return 'file'
 
+    @functools.cached_property
     def suffix(self):
-        return self.path.suffix
+        return ''
 
+    @functools.cached_property
     def order(self):
         # files sort after other types
-        return 1, self.licenses(), self.path.name
+        return 1, self.licenses, self.path.name
 
     def walk(self):
-        if lics := self.licenses():
-            # don't print files without license by default
-            yield self.path, self.type(), self.licenses()
+        # don't print files without license by default
+        if self.licenses:
+            yield self
 
 @dataclasses.dataclass
 class Subtree:
     opts: argparse.Namespace
     path: pathlib.Path
     tree: pygit2.Object
-    _entries_cache: typing.Optional[list] =  dataclasses.field(default=None, init=False)
-    _licenses_cache: typing.Optional[list] = dataclasses.field(default=None, init=False)
 
-    def _entries(self):
+    @functools.cached_property
+    @generate_list
+    def entries(self):
         "Generate an unsorted sequence of items underneath this Subtree"
 
         for item in self.tree:
@@ -145,100 +148,108 @@ class Subtree:
                 # content so it's easy to have up-to-date output when editing.
                 yield File(self.opts, itempath)
 
-    def entries(self):
-        if self._entries_cache is None:
-            self._entries_cache = list(self._entries())
-        return self._entries_cache
-
+    @functools.cached_property
     def licenses(self):
-        if self._licenses_cache is None:
-            lics = itertools.chain.from_iterable(e.licenses() for e in self.entries())
-            self._licenses_cache = tuple(sorted(set(lics)))
-        return self._licenses_cache
+        lics = itertools.chain.from_iterable(e.licenses for e in self.entries)
+        return tuple(sorted(set(lics)))
 
+    @functools.cached_property
     def type(self):
-        return 'tree' if len(self.licenses()) > 1 else 'monotree'
+        return 'tree' if len(self.licenses) > 1 else 'monotree'
 
+    @functools.cached_property
     def suffix(self):
         return '/'
 
+    @functools.cached_property
     def order(self):
         # files sort after other types
-        lics = self.licenses()
-        order = 2 if len(lics) <= 1 else 3
-        return order, self.licenses(), self.path.name
+        lics = self.licenses
+        order = 2 if self.type == 'monotree' else 3
+        return order, self.licenses, self.path.name
 
     def walk(self):
-        lics = self.licenses()
-        typ = self.type()
-        yield self.path, typ, lics
+        lics = self.licenses
+        yield self
 
-        if typ == 'monotree':
+        if self.type == 'monotree':
             # The licenses are all identical, don't list individual items.
             return
 
+        grouped = False
         if self.opts.glob_suffixes:
             try:
-                grouped = GroupSuffixes(self.entries())
+                grouped = GroupSuffixes(self.entries)
             except ValueError:
                 pass
-            else:
-                # grouped
-                yield from grouped.walk()
-                return
 
-        # ungrouped
-        for item in sorted(self.entries(), key=lambda x:x.order()):
+        entries = grouped.walk() if grouped else self.entries
+        for item in sorted(entries, key=lambda x:x.order):
             yield from item.walk()
+
+
+@dataclasses.dataclass
+class SuffixGlob:
+    path: pathlib.Path
+    licenses: tuple
+    is_tree: bool
+
+    @functools.cached_property
+    def suffix(self):
+        return '/' if self.is_tree else ''
+
+    @functools.cached_property
+    def order(self):
+        # globs sort before files but after other types
+        return 0, self.licenses, self.path.name
+
+    @functools.cached_property
+    def type(self):
+        return 'tree-glob' if self.is_tree else 'file-glob'
+
+    def walk(self):
+        yield self
 
 
 class GroupSuffixes:
     def __init__(self, entries):
-        self.by_ext = collections.defaultdict(list)
+        self.by_suffix = collections.defaultdict(list)
         for item in entries:
-            if item.type() == 'tree':
+            if item.type == 'tree':
                 raise ValueError('Cannot group (non-mono-)tree')
-            self.by_ext[item.suffix()].append(item)
+            self.by_suffix[item.path.suffix].append(item)
 
     def walk(self):
-        yield from self._walk(0)
-        yield from self._walk(1)
-        yield from self._walk(2)
+        for suffix, items in self.by_suffix.items():
+            lics = set(item.licenses for item in items)
+            types = set(item.type for item in items)
 
-    def _walk(self, phase):
-        for suffix, items in self.by_ext.items():
-            lics = set(item.licenses() for item in items)
-
-            # We group items if they all have the same license.
+            # We group items if they all have the same license and type.
             # We don't want to "group" one item, because it's clearer to display it
             # without a glob.
             # We can't group files with an empty suffix, because the glob would
             # be confusing. We can only group them if the whole tree is grouped
             # as a monotree, which happens elsewhere.
-            if len(lics) == 1 and len(items) > 1 and suffix:
+            if len(lics) == 1 and len(types) == 1 and len(items) > 1 and suffix:
                 # all the same
-                if phase == 1:
-                    glob = items[0].path.parent / f'*{suffix}'
-                    type = 'tree-glob' if suffix == '/' else 'file-glob'
-                    yield glob, type, lics.pop()
-            elif items[0].type() == 'monotree':
-                if phase == 0:
-                    yield from items[0].walk()
+                glob = items[0].path.parent / f'*{suffix}'
+                is_tree = types.pop() == 'monotree'
+                yield SuffixGlob(glob, lics.pop(), is_tree)
             else:
-                if phase == 2:
-                    for item in sorted(items, key=lambda x:x.order()):
-                        yield from item.walk()
+                for item in items:
+                    yield from item.walk()
 
 
-TYPE_SUFFIXES = {'file':'', 'file-glob':'', 'tree':'/', 'tree-glob':'*/', 'monotree':'/*'}
 def find_files_one(opts, tree, subpath):
     prev = ()
-    for path, typ, lics in Subtree(opts, subpath, tree).walk():
-        indent = '    ' * len(path.parts)
+    for item in Subtree(opts, subpath, tree).walk():
+        lics = item.licenses
+        indent = '    ' * len(item.path.parts)
         if prev == (indent, lics):
-            print(f'{indent}{path.name}{TYPE_SUFFIXES[typ]}')
+            print(f'{indent}{item.path.name}{item.suffix}')
         else:
-            print(f'{indent}{path.name}{TYPE_SUFFIXES[typ]} → {BRIGHT}{", ".join(lics)}{RESET_ALL}')
+            print(f'{indent}{item.path.name}{item.suffix}'
+                  f' → {BRIGHT}{", ".join(lics) or "(none)"}{RESET_ALL}')
             prev = (indent, lics)
 
 def find_files(opts):
