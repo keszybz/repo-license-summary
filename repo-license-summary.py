@@ -5,6 +5,7 @@
 """
 
 import argparse
+import collections
 import dataclasses
 import functools
 import itertools
@@ -51,6 +52,7 @@ def do_opts():
                                      formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('--repository', default='.', type=pathlib.Path)
     parser.add_argument('--branch')
+    parser.add_argument('--glob-suffixes', action='store_true')
     parser.add_argument('subpaths', type=pathlib.Path, nargs='*')
 
     opts = parser.parse_args()
@@ -101,6 +103,12 @@ class File:
         # print(f'{path}: {lic}')
         return [lic]
 
+    def type(self):
+        return 'file'
+
+    def suffix(self):
+        return self.path.suffix
+
     def order(self):
         # files sort after other types
         return (1, self.licenses(), self.path.name)
@@ -108,7 +116,7 @@ class File:
     def walk(self):
         if lics := self.licenses():
             # don't print files without license by default
-            yield self.path, 'file', self.licenses()
+            yield self.path, self.type(), self.licenses()
 
 @dataclasses.dataclass
 class Subtree:
@@ -148,6 +156,12 @@ class Subtree:
             self._licenses_cache = sorted(set(lics))
         return self._licenses_cache
 
+    def type(self):
+        return 'tree' if len(self.licenses()) > 1 else 'monotree'
+
+    def suffix(self):
+        return '/'
+
     def order(self):
         # files sort after other types
         lics = self.licenses()
@@ -156,18 +170,67 @@ class Subtree:
 
     def walk(self):
         lics = self.licenses()
-        typ = 'tree' if len(lics) > 1 else 'monotree'
+        typ = self.type()
         yield self.path, typ, lics
 
         if typ == 'monotree':
             # The licenses are all identical, don't list individual items.
-            # yield from sorted(subtree, key=operator.itemgetter(2))
             return
 
+        if self.opts.glob_suffixes:
+            try:
+                grouped = GroupSuffixes(self.entries())
+            except ValueError:
+                pass
+            else:
+                # grouped
+                yield from grouped.walk()
+                return
+
+        # ungrouped
         for item in sorted(self.entries(), key=lambda x:x.order()):
             yield from item.walk()
 
-TYPE_SUFFIXES = {'file':'', 'tree':'/', 'monotree':'/*'}
+
+class GroupSuffixes:
+    def __init__(self, entries):
+        self.by_ext = collections.defaultdict(list)
+        for item in entries:
+            if item.type() == 'tree':
+                raise ValueError('Cannot group (non-mono-)tree')
+            self.by_ext[item.suffix()].append(item)
+
+    def walk(self):
+        yield from self._walk(0)
+        yield from self._walk(1)
+        yield from self._walk(2)
+
+    def _walk(self, phase):
+        for suffix, items in self.by_ext.items():
+            lics = set(tuple(item.licenses()) for item in items)
+
+            # We group items if they all have the same license.
+            # We don't want to "group" one item, because it's clearer to display it
+            # without a glob.
+            # We can't group files with an empty suffix, because the glob would
+            # be confusing. We can only group them if the whole tree is grouped
+            # as a monotree, which happens elsewhere.
+            if len(lics) == 1 and len(items) > 1 and suffix:
+                # all the same
+                if phase == 1:
+                    glob = items[0].path.parent / f'*{suffix}'
+                    type = 'tree-glob' if suffix == '/' else 'file-glob'
+                    yield glob, type, lics.pop()
+            elif items[0].type() == 'monotree':
+                if phase == 0:
+                    yield from items[0].walk()
+            else:
+                if phase == 2:
+                    for item in sorted(items, key=lambda x:x.order()):
+                        yield from item.walk()
+
+
+TYPE_SUFFIXES = {'file':'', 'file-glob':'', 'tree':'/', 'tree-glob':'*/', 'monotree':'/*'}
 def find_files_one(opts, tree, subpath):
     prev = ()
     for path, typ, lics in Subtree(opts, subpath, tree).walk():
