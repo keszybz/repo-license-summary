@@ -19,6 +19,7 @@ from fnmatch import fnmatch
 try:
     import colorama as c
     GREEN = c.Fore.GREEN
+    MAGENTA = c.Fore.MAGENTA
     BLUE = c.Fore.BLUE
     YELLOW = c.Fore.YELLOW
     RED = c.Fore.RED
@@ -52,6 +53,9 @@ def license_color(name):
     match name:
         case 'unknown'|'unreadable':
             return RED;
+        case 'binary':
+            # a binary file with no license specified
+            return MAGENTA;
         case 'WITH'|'AND'|'OR':
             return '';
         case string if 'LGPL' in string:
@@ -116,6 +120,14 @@ class File:
     def licenses(self):
         if self.path.is_symlink():
             raise ValueError('symlink in unexpected place')
+
+        if self.opts._repo.get_attr(self.path, 'generated'):
+            # File is marked as 'generated'. No license applies.
+            return ()
+
+        if self.opts._repo.get_attr(self.path, 'binary'):
+            # File is marked as 'binary', i.e. unparsable for us.
+            return ('binary',)
 
         with open(self.opts.repository / self.path) as f:
             try:
@@ -287,7 +299,7 @@ def find_files_one(opts, tree, subpath):
             prev = (indent, lics)
 
 def find_files(opts):
-    repo = pygit2.Repository(opts.repository)
+    repo = opts._repo = pygit2.Repository(opts.repository)
 
     branch = opts.branch or repo.head.name
     tree = repo.revparse_single(branch).tree
