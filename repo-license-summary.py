@@ -201,7 +201,8 @@ class Subtree:
         return order, self.licenses, self.path.name
 
     def walk(self):
-        yield self
+        if self.licenses:
+            yield self
 
         if self.type == 'monotree':
             # The licenses are all identical, don't list individual items.
