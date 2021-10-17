@@ -86,7 +86,8 @@ def do_opts():
     return opts
 
 def find_license(path, file):
-    for n, line in enumerate(file):
+    n = 0
+    for n, line in enumerate(file, start=1):
         line = line.strip()
         if m := re.search(r'SPDX-License-Identifier:\s*(.*)', line):
             text = m.group(1)
@@ -97,6 +98,8 @@ def find_license(path, file):
 
         if n > 20:
             break
+    if n == 0:
+        return None
     return 'unknown'
 
 def generate_list(func):
@@ -121,6 +124,8 @@ class File:
                 print(f'Cannot read {self.path}: {e}')
                 return ('unreadable',)
 
+        if lic is None:
+            return ()
         if lic == 'unknown':
             name = self.path.name.removesuffix('.in')
             if any(fnmatch(name, p) for p in IGNORED_FILES):
@@ -196,7 +201,6 @@ class Subtree:
         return order, self.licenses, self.path.name
 
     def walk(self):
-        lics = self.licenses
         yield self
 
         if self.type == 'monotree':
@@ -235,7 +239,8 @@ class SuffixGlob:
         return 'tree-glob' if self.is_tree else 'file-glob'
 
     def walk(self):
-        yield self
+        if self.licenses:
+            yield self
 
 
 class GroupSuffixes:
@@ -277,7 +282,7 @@ def find_files_one(opts, tree, subpath):
         else:
             disp = ', '.join(highlight_license(spec) for spec in lics)
             print(f'{indent}{item.path.name}{item.suffix}'
-                  f' → {disp}')
+                  f' → {disp or "(none)"}')
             prev = (indent, lics)
 
 def find_files(opts):
