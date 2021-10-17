@@ -19,6 +19,7 @@ from fnmatch import fnmatch
 try:
     import colorama as c
     GREEN = c.Fore.GREEN
+    BLUE = c.Fore.BLUE
     YELLOW = c.Fore.YELLOW
     RED = c.Fore.RED
     RESET_ALL = c.Style.RESET_ALL
@@ -46,6 +47,32 @@ IGNORED_FILES = [
     '*-map',
     'RFCs',
 ]
+
+def license_color(name):
+    match name:
+        case 'unknown'|'unreadable':
+            return RED;
+        case 'WITH'|'AND'|'OR':
+            return '';
+        case string if 'LGPL' in string:
+            return GREEN
+        case string if 'GPL' in string:
+            return BRIGHT + GREEN
+        case string if ('CC0-' in string or
+                        'public-domain' in string or
+                        'BSD' in string):
+            return BLUE
+        case 'MIT':
+            return BRIGHT + BLUE
+        case _:
+            return BRIGHT;
+
+def highlight_license(spec):
+    paren = spec and spec[0] == '(' and spec[-1] == ')'
+    if paren:
+        spec = spec[1:-1]
+
+    return ' '.join(f'{license_color(part)}{part}{RESET_ALL}' for part in spec.split())
 
 def do_opts():
     parser = argparse.ArgumentParser(description=__doc__,
@@ -248,8 +275,9 @@ def find_files_one(opts, tree, subpath):
         if prev == (indent, lics):
             print(f'{indent}{item.path.name}{item.suffix}')
         else:
+            disp = ', '.join(highlight_license(spec) for spec in lics)
             print(f'{indent}{item.path.name}{item.suffix}'
-                  f' → {BRIGHT}{", ".join(lics) or "(none)"}{RESET_ALL}')
+                  f' → {disp}')
             prev = (indent, lics)
 
 def find_files(opts):
