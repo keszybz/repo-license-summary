@@ -84,6 +84,7 @@ def do_opts():
     parser.add_argument('--repository', default='.', type=pathlib.Path)
     parser.add_argument('--branch')
     parser.add_argument('--glob-suffixes', action='store_true')
+    parser.add_argument('--unknown', action='store_true')
     parser.add_argument('subpaths', type=pathlib.Path, nargs='*')
 
     opts = parser.parse_args()
@@ -300,7 +301,16 @@ class GroupSuffixes:
             yield from item.walk()
 
 
-def find_files_one(opts, tree, subpath):
+def find_files_one_unknown(opts, tree, subpath):
+    for item in Subtree(opts, subpath, tree).walk():
+        if (item.type != 'tree' and
+            item.licenses in {('binary',), ('unknown',)}):
+
+            disp = highlight_license(*item.licenses)
+            print(f'{item.path}{item.suffix} → {disp}')
+
+
+def find_files_one_display(opts, tree, subpath):
     prev = ()
     for item in Subtree(opts, subpath, tree).walk():
         lics = item.licenses
@@ -312,6 +322,12 @@ def find_files_one(opts, tree, subpath):
             print(f'{indent}{item.path.name}{item.suffix}'
                   f' → {disp or "(none)"}')
             prev = (indent, lics)
+
+def find_files_one(opts, tree, subpath):
+    if opts.unknown:
+        find_files_one_unknown(opts, tree, subpath)
+    else:
+        find_files_one_display(opts, tree, subpath)
 
 def find_files(opts):
     repo = opts._repo = pygit2.Repository(opts.repository)
