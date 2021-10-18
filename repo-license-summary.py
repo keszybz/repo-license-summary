@@ -222,14 +222,11 @@ class Subtree:
 
         grouped = False
         if self.opts.glob_suffixes:
-            try:
-                grouped = GroupSuffixes(self.entries)
-            except ValueError:
-                pass
-
-        entries = grouped.walk() if grouped else self.entries
-        for item in sorted(entries, key=lambda x:x.order):
-            yield from item.walk()
+            grouped = GroupSuffixes(self.entries)
+            yield from grouped.walk()
+        else:
+            for item in sorted(self.entries, key=lambda x:x.order):
+                yield from item.walk()
 
 
 @dataclasses.dataclass
@@ -259,12 +256,23 @@ class SuffixGlob:
 class GroupSuffixes:
     def __init__(self, entries):
         self.by_suffix = collections.defaultdict(list)
+        self.ungrouped = []
+
         for item in entries:
             if item.type == 'tree':
-                raise ValueError('Cannot group (non-mono-)tree')
-            self.by_suffix[item.path.suffix].append(item)
+                # Cannot group (non-mono-)tree
+                self.ungrouped.append(item)
+            elif item.type == 'monotree':
+                self.by_suffix['/'].append(item)
+            else:
+                self.by_suffix[item.path.suffix].append(item)
 
-    def walk(self):
+        if self.by_suffix['/'] and self.ungrouped:
+            # We cannot group any subtrees if we can't group them all
+            self.ungrouped += self.by_suffix['/']
+            self.by_suffix['/'].clear()
+
+    def _walk(self):
         for suffix, items in self.by_suffix.items():
             lics = set(item.licenses for item in items)
             types = set(item.type for item in items)
@@ -283,6 +291,13 @@ class GroupSuffixes:
             else:
                 for item in items:
                     yield from item.walk()
+
+    def walk(self):
+        for item in sorted(self._walk(), key=lambda x:x.order):
+            yield from item.walk()
+
+        for item in sorted(self.ungrouped, key=lambda x:x.order):
+            yield from item.walk()
 
 
 def find_files_one(opts, tree, subpath):
