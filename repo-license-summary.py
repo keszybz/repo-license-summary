@@ -209,7 +209,7 @@ class Subtree:
     def order(self):
         # files sort after other types
         lics = self.licenses
-        order = 2 if self.type == 'monotree' else 3
+        order = 1 if self.type == 'monotree' else 3
         return order, self.licenses, self.path.name
 
     def walk(self):
@@ -245,7 +245,7 @@ class SuffixGlob:
     @functools.cached_property
     def order(self):
         # globs sort before files but after other types
-        return 0, self.licenses, self.path.name
+        return 1, self.licenses, self.path.name
 
     @functools.cached_property
     def type(self):
